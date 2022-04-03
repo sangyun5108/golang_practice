@@ -6,11 +6,16 @@ import (
 	"net/http"
 )
 
+type requestResult struct {
+	url string
+	status string
+}
+
 func main(){
 
-	results := map[string]string{}
+	results:=map[string]string{}
 
-
+	c:=make(chan requestResult)
 
 	urls:=[]string{
 		"https://www.naver.com",
@@ -21,36 +26,30 @@ func main(){
 
 
 	for _,value:=range urls {
-
-		ok:="OK"
-		err:= hitURL(value)
-
-		if err!=nil {
-			fmt.Println(err)
-		}else {
-			results[value] = ok
-		}
+		go hitURL(value,c)
 	}
 
-	for url,result:=range results {
-		fmt.Println(url,result)
+	for i:=0 ; i<len(urls); i++ {
+		result := <-c
+		results[result.url] = result.status
 	}
+
+	for key,value := range results {
+		fmt.Println(key, value)
+	}
+
 }
 
 var errRequestFailed = errors.New("Request Failed")
 
-func hitURL(url string) error {
+func hitURL(url string, c chan requestResult) {
 
 	fmt.Println("Checking:",url)
 
 	resp,err:=http.Get(url)
 
 	if err != nil || resp.StatusCode >= 400 {
-		fmt.Println(err)
-		return errRequestFailed
+		c <- requestResult{url: url, status: "OK"}
 	}
-
-	fmt.Println("완벽합니다")
-	
-	return nil
+	c <- requestResult{url: url, status:"Fail"}
 }
