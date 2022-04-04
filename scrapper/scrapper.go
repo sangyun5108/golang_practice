@@ -1,14 +1,13 @@
 package main
 
 import (
-	"encoding/csv"
 	"fmt"
 	"log"
 	"net/http"
-	"os"
 	"strconv"
 
 	"github.com/PuerkitoBio/goquery"
+	ccsv "github.com/tsak/concurrent-csv-writer"
 )
 
 type jobData struct {
@@ -20,48 +19,46 @@ var baseURL string = "https://kr.indeed.com/jobs?q=python"
 
 func main(){
 
-	c2:=make(chan []jobData)
+	c1:=make(chan []jobData)
 	jobs:=[]jobData{}
 
 	totalPages:=getPages()
 	
 	for i:=0; i<totalPages; i++ {
-		go getPage(i,c2)
-		job:= <- c2
-		fmt.Println(job)
+		go getPage(i,c1)
+		job := <- c1
+		jobs = append(jobs, job...)
 	}
 
 	writeJobs(jobs)
 }
 
 func writeJobs(jobs []jobData){
-	file,err := os.Create("jobs.csv")
-
+	csv,err := ccsv.NewCsvWriter("jobs.csv")
 	checkErr(err)
-
-	// 파일 생성
-	w:=csv.NewWriter(file)
+	done:=make(chan bool)
+	
 
 	// 데이터가 파일에 입력된다.
-	defer w.Flush()
+	defer csv.Close()
 
-	headers := []string{"Title","Location"}
 
-	wrError := w.Write(headers)
+	for i:=0; i<len(jobs); i++ {
+		go func(i int){
+			csv.Write([]string{jobs[i].title,jobs[i].location})
+			done <- true
+		}(i)
+	}
 
-	checkErr(wrError)
-
-	for _,job := range jobs {
-		jobSlice := []string{job.title, job.location}
-		wrError = w.Write(jobSlice)
-		checkErr(wrError)
+	for i:=0; i<len(jobs); i++ {
+		<- done
 	}
 }
 
-func getPage(page int,c2 chan []jobData) {
+func getPage(page int, c1 chan <- []jobData)  {
 
-	c:=make(chan jobData)
 	jobs:=[]jobData{}
+	c:=make(chan jobData)
 
 	// strconv.Itoa : int를 str로 형변환
 	pageUrl := baseURL + "&start=" + strconv.Itoa(page*10)
@@ -83,17 +80,19 @@ func getPage(page int,c2 chan []jobData) {
 		fmt.Println("Error")
 	}
 
-	doc.Find(".job_seen_beacon").Each(func(i int, s *goquery.Selection){
+	cards := doc.Find(".job_seen_beacon")
+
+	cards.Each(func(i int, s *goquery.Selection){
 		go getData(s,c)
 	})
 
-	for i:=0; i<page; i++ {
+	for i:=0; i<cards.Length(); i++ {
 		job:= <-c
 		fmt.Println(job)
 		jobs = append(jobs,job)
-		fmt.Println(jobs)
-		c2 <- jobs // page별 목록
 	}
+
+	c1 <- jobs
 }
 
 func getData(s *goquery.Selection, c chan jobData) {
